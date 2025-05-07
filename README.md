@@ -9,7 +9,7 @@ This repository contains the code and theoretical background of the Project in P
 ## Input files
 The input files are written in the following way:
 ```console
-2 4 1 6 -> n_atom n_electron spin_multiplicity n_total_basis_sto
+2 4 6 -> n_atom n_electron n_total_basis_sto
 0.0 0.0 0.0 1.0 2 -> x y z atomic_num n_basis_sto
 1.3 -> exponent_sto_1
 0.7 -> exponent_sto_2
