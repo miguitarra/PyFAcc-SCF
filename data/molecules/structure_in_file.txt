@@ -1,7 +1,0 @@
-General structure of input file follows:
-n_atoms  n_electrons  n_basis_functions
-x_cartesian  y_cartesian  z_cartesian  nuclear_charge  n_basis_functions
-exponents_basis_functions
-.
-.
-.
