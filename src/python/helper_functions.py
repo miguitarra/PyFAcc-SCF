@@ -21,7 +21,7 @@ def parser_input(filename):
         lines = f.readlines()
 
     # First line: number of atoms, number of electrons, total basis functions
-    num_atoms, num_electrons, total_basis_functions = map(int, lines[0].split())
+    num_atoms, num_electrons, nalpha, nbeta, total_basis_functions = map(int, lines[0].split())
 
     # Initialize arrays
     coords = np.zeros((num_atoms, 3), dtype=np.float64)  # Shape: num_atoms x 3
@@ -48,7 +48,7 @@ def parser_input(filename):
             basisf_exp.append(float(lines[i].strip()))
             i += 1
 
-    return num_atoms, num_electrons, np.array(atomic_numbers, dtype=np.int32), coords, np.array(num_basisf_atom, dtype=np.int32), np.array(basisf_exp, dtype=np.float64)
+    return num_atoms, num_electrons, nalpha, nbeta, np.array(atomic_numbers, dtype=np.int32), coords, np.array(num_basisf_atom, dtype=np.int32), np.array(basisf_exp, dtype=np.float64)
 
 def print_atom_info(filename):
     """
@@ -70,7 +70,7 @@ def print_atom_info(filename):
         print(f"  Number of Basis Functions: {num_basisf_atom[i]}")
         print(f"  Basis Function Exponents: {basisf_exp[sum(num_basisf_atom[:i]):sum(num_basisf_atom[:i + 1])]}")
 
-def run_scf(lib, natoms, nelectrons, atomic_numbers, coords, eps_scf, max_iter, nbasis_atom, basis_exp, basis_set = 6):
+def run_scf(lib, natoms, nelectrons, nalpha, nbeta, atomic_numbers, coords, eps_scf, max_iter, nbasis_atom, basis_exp, basis_set = 6):
     # Convert inputs to ctypes
     atomic_numbers = (ctypes.c_int * len(atomic_numbers))(*atomic_numbers)
     coords = (ctypes.c_double * len(coords.flatten()))(*coords.flatten())
@@ -80,7 +80,7 @@ def run_scf(lib, natoms, nelectrons, atomic_numbers, coords, eps_scf, max_iter, 
     eps_scf = ctypes.c_double(eps_scf)
 
     # Call the C wrapper
-    lib.run_scf_c(natoms, nelectrons,atomic_numbers, coords, eps_scf, max_iter, 
+    lib.run_scf_c(natoms, nelectrons, nalpha, nbeta, atomic_numbers, coords, eps_scf, max_iter, 
                       ctypes.byref(final_energy), nbasis_atom, basis_exp, basis_set)
 
     return final_energy.value
