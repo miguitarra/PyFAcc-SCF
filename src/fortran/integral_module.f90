@@ -1,21 +1,17 @@
 ! Taken from ReadTheDocs version
 module integrals
+    use constants_struct
+    use openacc
     implicit none
 
     private
     public :: oneint,twoint
 
-    integer, parameter :: wp = selected_real_kind(15)
-
-    real(wp), parameter :: pi = 4.0_wp*atan(1.0_wp)
-    real(wp), parameter :: tpi = 2.0_wp*pi
-    real(wp), parameter :: twopi25 = 2.0_wp*pi**(2.5_wp)
-
 contains
 
 !> one electron integrals over spherical gaussian functions
 pure subroutine oneint(xyz, chrg, r_a, r_b, alp, bet, ci, cj, sab, tab, vab)
-
+    !$acc routine seq
     implicit none
 
     !> position of all atoms in atomic units
@@ -71,13 +67,13 @@ pure subroutine oneint(xyz, chrg, r_a, r_b, alp, bet, ci, cj, sab, tab, vab)
             ab = exp(-est)
             s00 = cab*ab*sqrt(pi*oab)**3
 
-            !        overlap
+            !overlap
             sab = sab+s00
 
-            !        kinetic energy
+            !kinetic energy
             tab = tab + xab*(3.0_wp-2.0_wp*est)*s00
 
-            !        nuclear attraction
+            !nuclear attraction
             fact = cab*tpi*oab*ab
             r_p = (alp(i)*r_a+bet(j)*r_b)*oab
             do k = 1, nat
@@ -93,7 +89,7 @@ end subroutine oneint
 !> two-electron repulsion integral (ab|cd) over spherical gaussian functions
 !  quantity is given in chemist's notation
 pure subroutine twoint(r_a, r_b, r_c, r_d, alp, bet, gam, del, ci, cj, ck, cl, tei)
-
+    !$acc routine seq
     implicit none
 
     !> aufpunkte of gaussians
@@ -179,6 +175,7 @@ end subroutine twoint
 
 !> zeroth order boys function
 pure elemental function boysf0(arg) result(boys)
+    !$acc routine seq
     implicit none
     real(wp),intent(in) :: arg
     real(wp) :: boys

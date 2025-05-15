@@ -1,6 +1,7 @@
 module utils_module
     use iso_c_binding
     use molecule_module
+    use openacc
     implicit none
     
     contains

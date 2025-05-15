@@ -7,17 +7,11 @@
 module slater
     use iso_c_binding
     use molecule_module
+    use basis_function_struct
+    use constants_struct
+    use openacc
     !> Always declare everything explicitly
     implicit none
-
-    type :: BasisFunction
-        integer(c_int) :: atom
-        real(c_double), allocatable :: exponents(:)
-        real(c_double), allocatable :: coefficients(:)
-        real(c_double), allocatable :: center(:) ! (3,)
-    end type BasisFunction
-
-
 
     !> Export expand_slater
     private
@@ -29,8 +23,6 @@ module slater
     !> Number of functions
     integer, parameter :: nf = 15
 
-    !> Two over pi
-    real(wp), parameter :: top = 0.5_wp/atan(1.0_wp)
 
     !> Double factorial, see OEIS A001147
     real(wp), parameter :: dfactorial(8) = &
