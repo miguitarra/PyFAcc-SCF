@@ -31,7 +31,7 @@ cmake . -DCMAKE_INSTALL_PREFIX=../libint-2.11.1-install/ -DCMAKE_CXX_COMPILER=g+
 cmake --build .
 cmake --build . --target install
 ```
-Make sure to change the path of installation of the compiler (nvfortran).
+Make sure to change the path of installation of the compiler (nvfortran) and libint-2.x.y to the downloaded version.
 
 
 
