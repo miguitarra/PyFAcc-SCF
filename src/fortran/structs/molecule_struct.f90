@@ -3,17 +3,15 @@ module molecule_struct
     use constants_struct
     implicit none
 
-    public :: Molecule
+    public :: Molecule_type
     
-    type :: Molecule
+    type :: Molecule_type
         integer :: natoms
         integer :: nelectrons
         integer :: nalpha
         integer :: nbeta
         integer(c_int), allocatable :: atomic_numbers(:)
-        real(c_double), allocatable :: coords(:,:) ! (3, natoms)
-        integer(c_int), allocatable :: nbasis_atom(:) ! Changed to 1D array
-        real(c_double), allocatable :: basis_exp(:)
+        real(c_double), allocatable :: coords(:,:) ! (natoms, 3)
         real(wp) :: Enuc ! Nuclear energy
-    end type Molecule
+    end type 
 end module molecule_struct
