@@ -19,6 +19,7 @@ This repository contains the code and theoretical background of the Project in P
 ## External Dependencies
 - Libint.
 - Boost (Libint dependency).
+- Eigen3 (Libint dependency).
 
 
 ## Libint quick build
@@ -27,7 +28,7 @@ Download the latest version from (https://github.com/evaleev/libint/releases/tag
 ```console
 ~$ tar -xvzf libint-2.x.y.tgz
 cd libint-2.x.y
-cmake . -DCMAKE_INSTALL_PREFIX=../libint-2.11.1-install/ -DCMAKE_CXX_COMPILER=g++ -DCMAKE_CXX_FLAGS="-O1" -DREQUIRE_CXX_API=OFF -DENABLE_FORTRAN=ON -DCMAKE_Fortran_COMPILER=/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/compilers/bin/nvfortran -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+cmake . -DCMAKE_INSTALL_PREFIX=../libint-2.11.1-install/ -DCMAKE_CXX_COMPILER=g++ -DCMAKE_CXX_FLAGS="-O1" -DENABLE_FORTRAN=ON -DCMAKE_Fortran_COMPILER=/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/compilers/bin/nvfortran -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 cmake --build .
 cmake --build . --target install
 ```
