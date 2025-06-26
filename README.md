@@ -1,5 +1,6 @@
 # CPU/GPU acceleration of SCF module
-This repository contains the code and theoretical background of the Project in Practice with Molecular Quantum Solutions (MQS) produced during the Spring block of 2025.
+This repository contains the code produced during a Project in Practice at the University of Copenhagen in collaboration with Molecular Quantum Solutions (MQS) during the Spring block of 2025.
+
 
 ---
 > Contact:
@@ -11,9 +12,8 @@ This repository contains the code and theoretical background of the Project in P
 - Usage of STO-{2-6}g basis sets.
 - .XYZ input file support.
 - Calculation of SCF energy for unrestricted (open-shell) and restricted (closed-shell) systems.
-- Calculation of two-Electron Repulsive Integrals (ERIs) with Libint.
-- OpenMP accelerated ERI matrix building.
-- OpenACC accelerated Fock matrix building and SCF routine.
+- Calculation of two-electron Repulsive Integrals (ERIs) with Libint.
+- OpenACC accelerated one-electron integrals, Fock matrix building, and SCF energy calculation.
 
 
 ## External Dependencies
@@ -23,7 +23,9 @@ This repository contains the code and theoretical background of the Project in P
 
 
 ## Libint quick build
-For an in-depth explanation, visit the [LIBINT repository](https://github.com/evaleev/libint). For convenience, the following can be used with this project:
+For an in-depth explanation, visit the [LIBINT repository](https://github.com/evaleev/libint). 
+For convenience, the following can be used with this project:
+
 Download the latest version from (https://github.com/evaleev/libint/releases/tag/v2.11.1).
 ```console
 ~$ tar -xvzf libint-2.x.y.tgz
@@ -49,7 +51,6 @@ From there on, one can use the included Python file to run SCF simulations on th
 ---
 
 ## Future Improvements and Next Steps
-- Usage of cuSOLVER for eigenvalue-like calculations.
-- Inclusion of Libint one-electron integral calculations (currently own implementation).
-- Apply OpenMP to the formation of the one-electron integral matrices.
-- Benchmarking.
+- Possible usage of cuSOLVER for eigenvalue-like and linear algebra calculations (fully CUDA package from Nvidia).
+- Focus on ERI computations: research on advanced techniques, higher GPU offloading.
+- Investigate Fock Matrix building techniques.
