@@ -4,7 +4,7 @@ module main
     use basis_function_struct
     use basis
     use constants_struct
-    use molecule_struct
+    use molecule
     use openacc
     use rscf
     use uscf
@@ -21,20 +21,34 @@ contains
         real(c_double), intent(in) :: eps_scf
         real(c_double), intent(out) :: final_energy
         type(BasisFunction_type), allocatable :: basis_functions(:)
-        type(Molecul_type) :: mol
+        type(Molecule_type) :: mol
         type(Shell_type), allocatable :: shells(:)
+        integer :: dev_type
         integer :: implicit
 
         character(len=100) :: basis_file
         write(basis_file, '(A,I0,A)') './data/basis_set/sto-', basis_set_n, 'g.txt'
+
+            
+        dev_type = acc_get_device_type()
+    
+        select case (dev_type)
+        case (acc_device_nvidia)
+            !print *, "OpenACC: Running on NVIDIA GPU."
+        case (acc_device_host)
+            print *, "OpenACC: Running on host (CPU)."
+        case default
+            !print *, "OpenACC: Unknown or unsupported device type."
+        end select
+
         
-        print *, "Starting molecule initialization"
+        !print *, "Starting molecule initialization"
         call init_molecule(mol, natoms, nelectrons, nalpha, nbeta, z_num, coords)
-        print *, "Molecule initialized successfully."
+        !print *, "Molecule initialized successfully."
 
         ! Call basis creation
         call build_basis_functions(species, coords, natoms, basis_file, basis_functions, shells)
-        print *, "Basis functions filled successfully."
+        !print *, "Basis functions filled successfully."
 
         ! Run SCF calculation
         if (nalpha == nbeta) then
@@ -42,7 +56,7 @@ contains
         else 
             call run_uscf(mol, shells, basis_functions, eps_scf, max_iter, final_energy, basis_set_n)
         end if
-        print *, "SCF calculation completed successfully."
+        !print *, "SCF calculation completed successfully."
         
 
     end subroutine run_scf_interface_py

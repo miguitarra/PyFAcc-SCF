@@ -79,8 +79,8 @@ contains
     ! Norm of Cartesian Gaussian integrals with arbitrary angular momentum
     ! --------------------------------------------------------------------
     FUNCTION norm(ax,ay,az,aa) result(N)
-        ! INPUT
         !$acc routine seq
+        ! INPUT
         INTEGER, intent(in) :: ax, ay, az ! Cartesian Gaussian angular momenta projections
         REAL*8, intent(in) :: aa ! Gaussian exponential coefficient
 

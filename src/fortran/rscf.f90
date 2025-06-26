@@ -1,7 +1,7 @@
 module rscf
     use constants_struct
     use molecule_struct
-    use molecule_struct
+    use molecule
     use basis_function_struct
     use utils
     use openacc
@@ -12,8 +12,10 @@ module rscf
     use kinetic
     use eri_struct
     use electronic
-    use integrals
+    use libint_integrals
     use iso_c_binding
+    USE libint_f, ONLY: libint_t, libint2_static_init, libint2_static_cleanup, libint2_build, libint2_max_am_eri, &
+                        compute_eri_f, libint2_init_eri, libint2_cleanup_eri
     implicit none
 
     private
@@ -40,8 +42,15 @@ contains
         real(wp), allocatable :: C(:,:)
         real(wp), allocatable :: eigvals(:), eigvecs(:,:)
         real(wp), allocatable :: ERI(:,:,:,:), ERI_flat(:)
+        integer, allocatable  :: index_map(:,:,:,:)
         real(wp) :: E_temp, ee_val1, ee_val2
+        integer :: max_am
 
+        max_am = shells(1)%l
+        do i = 2, size(shells)
+           if (shells(i)%l > max_am) max_am = shells(i)%l
+        end do
+        
         n = mol%nalpha + mol%nbeta
         n_occ = (n+1) / 2
                 
@@ -52,12 +61,13 @@ contains
         allocate(F(nbf,nbf), G(nbf,nbf))
         allocate(eps(nbf), C(nbf,nbf))
         allocate(eigvals(nbf))
+        allocate(index_map(nbf, nbf, nbf, nbf))
         
         ! Build ERI index list
         nbf_sym = nbf*(nbf+1)/2
         n_unique = nbf_sym*(nbf_sym+1)/2
 
-        allocate(eri_list(n_unique), ERI_flat(n_unique+1))
+        allocate(eri_list(n_unique), ERI_flat(n_unique + 1))
         ERI_flat = 0.0_wp
 
         idx = 0
@@ -77,101 +87,91 @@ contains
             end do
         end do 
 
-        print *, "ERI list populated"
-        !$acc data copyin(basis_functions, mol, mol%coords, mol%atomic_numbers, eri_list) &
-        !$acc     create(S, T, V, H, D, F, G, ERI_flat)
-        do i = 1, size(basis_functions)
-            !$acc enter data copyin(basis_functions(i)%exponents, basis_functions(i)%coefficients, basis_functions(i)%center, basis_functions(i)%ang_mom)
-        end do
+        !acc data copyin(basis_functions, mol, mol%coords, mol%atomic_numbers) &
+        !$acc data create(S, T, V, H, D, F, G, ERI_flat, index_map)
 
         ! One-electron integrals
-        print *, "Entering One electron integrals"
+        
         call S_overlap(nbf, basis_set_n , basis_functions, S)
         call T_kinetic(nbf, basis_set_n, basis_functions, T)
         call V_nuclear(nbf, basis_set_n, basis_functions, mol%coords, mol%atomic_numbers, mol%natoms, V)
+        !print *, "One electron integrals calculated"
+        
 
-        print *, "Full S matrix:" ! Overlap
-        call print_matrix(S, nbf)
-        print *, "Full T matrix:" ! Kinetic 
-        call print_matrix(T, nbf)
-        print *, "Full V matrix:" ! Potential
-        call print_matrix(V, nbf)
-
+        !$acc wait
 
         H = T + V  ! Compute core matrix
 
         ! Compute ERIs
-        call compute_ERI_libint(mol, shells,  basis_functions, n_unique, ERI_flat, eri_list, basis_set_n)
-        print *, "Two-electron integrals computed"
+
+        call libint2_static_init()
+        call compute_ERI_libint2(mol, shells,  basis_functions, n_unique, ERI_flat, eri_list, basis_set_n, index_map)
         !print *, ERI_flat
+        !$acc update device(index_map, ERI_flat)
 
         ! Initial Guess
         call orthonormal_diagonalize(H, S, eigvals, C)
         D = 2*matmul(C(:,1:n_occ), transpose(C(:,1:n_occ)))
 
         E_old = 0.0_wp
-        print *, "Entering scf loop"
+        
         do iter = 1, max_iter
             G = 0.0_wp
             !$acc update device(D)
-            !$acc parallel loop collapse(2) private(sum_g) present(D, G)
+            !$acc parallel loop collapse(2) gang vector private(sum_g, ee_val1, ee_val2) present(D, G, ERI_flat, index_map)
             do mu = 1, nbf
                 do nu = 1, nbf
                     sum_g = 0.0_wp
                     do lam = 1, nbf
                         do sig = 1, nbf
-                            ee_val1 = get_ERI(mu, nu, lam, sig, ERI_flat)
-                            ee_val2 = get_ERI(mu, sig, lam, nu, ERI_flat)
-                            sum_g = sum_g + D(lam,sig) * (ee_val1 - 0.5_wp  * ee_val2)
+                            ee_val1 = get_ERI(mu, nu, lam, sig, ERI_flat, index_map)
+                            ee_val2 = get_ERI(mu, sig, lam, nu, ERI_flat, index_map)
+                            sum_g = sum_g + D(lam,sig) * (ee_val1 - 0.5_wp * ee_val2)
                         end do
                     end do
                     G(mu,nu) = sum_g
                 end do
             end do
             !$acc update self(G)
-
+        
             F = H + G
-
             D_old = D
-
             call orthonormal_diagonalize(F, S, eps, C)
-
             D = 2*matmul(C(:,1:n_occ), transpose(C(:,1:n_occ)))
-
+        
             E_temp = 0.0_wp
             !$acc update device(D, H, F)
             !$acc parallel loop collapse(2) reduction(+:E_temp) present(D, H, F)
             do mu = 1, nbf
                 do nu = 1, nbf
-                    E_temp = E_temp +  D(mu,nu)  * (H(mu,nu) + F(mu,nu))
+                    E_temp = E_temp + D(mu,nu) * (H(mu,nu) + F(mu,nu))
                 end do
             end do
+        
             E_elec = 0.5_wp * E_temp
-
             delta_E = abs(E_elec - E_old)
             err_D = sqrt(sum((D - D_old)**2))
-            write(*,'(A,I6,A,F16.10,A,E10.2E2)') "Iter ", iter, "  E = ", E_elec + mol%Enuc, "  dE = ", delta_E
-
+        
             if (delta_E < eps_scf .and. err_D < eps_scf) exit
-            
             E_old = E_elec
         end do
+
+
         
-        do i = 1, size(basis_functions)
-            !$acc exit data delete(basis_functions(i)%exponents, basis_functions(i)%coefficients, basis_functions(i)%center)
-        end do
-        !$acc exit data delete(basis_functions, mol, mol%coords, mol%atomic_numbers, eri_list,S, T, V, H, D, F, G, ERI_flat)
+        !$acc exit data delete(basis_functions, mol, mol%coords, mol%atomic_numbers, S, T, V, H, D, F, G, ERI_flat, index_map)
         !$acc end data
 
         final_energy = E_elec + mol%Enuc
 
-        deallocate(S, T, V, H, D, F, G, D_old, eps, C, ERI_flat, eri_list, eigvals)
+        deallocate(S, T, V, H, D, F, G, D_old, eps, C, ERI_flat, eri_list, eigvals, index_map)
 
     end subroutine run_rscf
 
-    function get_ERI(mu, nu, lam, sig, ERI_flat) result(tei)
+    function get_ERI(mu, nu, lam, sig, ERI_flat, index_map) result(tei)
+        !$acc routine seq
         integer, intent(in) :: mu, nu, lam, sig
         real(wp), dimension(:), intent(in) :: ERI_flat
+        integer, intent(in) :: index_map(:,:,:,:)
         real(wp) :: tei
         integer :: idx
     

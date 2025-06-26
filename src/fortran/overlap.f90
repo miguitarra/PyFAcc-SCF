@@ -15,17 +15,18 @@ module overlap
 
     implicit none
     
-    real(8), parameter :: screen_threshold = 1.0D-12
+    real(8), parameter :: screen_threshold = 1.0D-10
     real(8), parameter :: distance_cutoff = 10.0D0
 
 contains
 
     function Si(a,b,aa,bb,Rai,Rbi,Ri)
+        !$acc routine seq
         ! ------------------------------------------------------------------------------------------------
         ! Compute overlap integral between two unnormalized Cartesian Gaussian functions along direction i
         ! ------------------------------------------------------------------------------------------------
 
-        !acc routine seq
+        !$acc routine seq
 
         ! INPUT
         integer, intent(in) :: a,b ! Angular momentum coefficients of the Gaussians along direction i
@@ -60,6 +61,7 @@ contains
 
 
     function overlap_coeff(ax,ay,az,bx,by,bz,aa,bb,Ra,Rb) result(S)
+        !$acc routine seq
         ! -----------------------------------------------------------------
         ! Compute overlap integral between two Cartesian Gaussian functions
         ! -----------------------------------------------------------------
@@ -72,7 +74,7 @@ contains
         !
         ! -----------------------------------------------------------------
 
-        !acc routine seq
+        !$acc routine seq
 
         ! INPUT
         integer, intent(in) :: ax, ay, az, bx, by, bz ! Angular momentum coefficients
@@ -106,6 +108,7 @@ contains
     ! Overlap for s-type Gaussians (zero angular momentum)
     !-----------------------------------------------------------
     function S00(aa, bb, Rai, Rbi)
+        !$acc routine seq
         real(8), intent(in) :: aa, bb, Rai, Rbi
         real(8) :: S00
         S00 = DSQRT(PI / (aa + bb)) * DEXP(- (aa * bb) / (aa + bb) * (Rai - Rbi)**2.0D0)
@@ -115,6 +118,7 @@ contains
     ! OS recursion for overlap integrals
     !-----------------------------------------------------------
     function Sij(a, b, aa, bb, Rai, Rbi, Rpi)
+        !$acc routine seq
         integer, intent(in) :: a, b
         real(8), intent(in) :: aa, bb, Rai, Rbi, Rpi
         real(8), dimension(-1:a+1, -1:b+1) :: S
@@ -147,7 +151,7 @@ contains
         ! Compute overlap integral between two Cartesian Gaussian functions using OS recursion
         ! ------------------------------------------------------------------------------------
 
-        !acc routine seq
+        !$acc routine seq
 
         ! INPUT
         INTEGER, intent(in) :: ax, ay, az, bx, by, bz ! Angular momentum coefficients
@@ -176,13 +180,10 @@ contains
     ! Compute the overall overlap matrix with screening and distance cutoff.
     !-----------------------------------------------------------
     subroutine S_overlap(Kf, c, basis_functions, S)
-    
-        use openacc
-        implicit none
-    
         integer, intent(in) :: Kf, c
         type(BasisFunction_type), intent(in) :: basis_functions(Kf)
         real(8), intent(out) :: S(Kf, Kf)
+        integer :: dev_type
     
         real(8) :: basis_D(Kf, c), basis_A(Kf, c)
         integer :: basis_L(Kf, 3)
@@ -191,11 +192,8 @@ contains
         integer :: i, j, k, l
         real(8) :: tmp, dprod, dist2
         real(8), dimension(3) :: Ri, Rj
-        integer :: idx, n_upper
+        integer :: idx
         real(8) :: f
-    
-        ! Precompute number of upper-triangle elements
-        n_upper = Kf * (Kf + 1) / 2
     
         ! Copy basis data into plain arrays (OpenACC-friendly)
         do i = 1, Kf
@@ -204,43 +202,35 @@ contains
             basis_L(i, :) = basis_functions(i)%ang_mom
             basis_R(i, :) = basis_functions(i)%center
         end do
+        
+        !$acc data copyin(basis_D, basis_A, basis_L, basis_R) async(1)
+        !$acc parallel loop collapse(2) private(k, l, tmp, dprod, Ri, Rj, dist2) default(present) async(1)
+        do i = 1, Kf
+            do j = 1, Kf
+                Ri = basis_R(i, :)
+                Rj = basis_R(j, :)
+                dist2 = sum((Ri(:) - Rj(:))**2)
     
-        S = 0.0D0
+                if (dist2 > distance_cutoff**2) cycle
     
-        !$acc data copyin(basis_D, basis_A, basis_L, basis_R) copyout(S)
-        !$acc parallel loop gang vector private(idx, i, j, k, l, tmp, dprod, dist2, Ri, Rj, f)
-        do idx = 1, n_upper
+                tmp = 0.0D0
+                do k = 1, c
+                    do l = 1, c
+                        dprod = basis_D(i,k) * basis_D(j,l)
+                        if (abs(dprod) < screen_threshold) cycle
     
-            ! Map flat index idx to (i, j) in upper triangle (1-based)
-            f = 0.5d0 * (-1.0d0 + sqrt(1.0d0 + 8.0d0 * dble(idx)))
-            i = int(f)
-            if (f /= dble(i)) i = i + 1
-            j = idx - (i - 1) * i / 2
-    
-            Ri = basis_R(i, :)
-            Rj = basis_R(j, :)
-            dist2 = (Ri(1) - Rj(1))**2 + (Ri(2) - Rj(2))**2 + (Ri(3) - Rj(3))**2
-    
-            if (dist2 > distance_cutoff**2) cycle
-    
-            tmp = 0.0D0
-            do k = 1, c
-                do l = 1, c
-                    dprod = basis_D(i, k) * basis_D(j, l)
-                    if (abs(dprod) < screen_threshold) cycle
-    
-                    tmp = tmp + dprod * overlap_coeff_OS( &
-                        basis_L(i,1), basis_L(i,2), basis_L(i,3), &
-                        basis_L(j,1), basis_L(j,2), basis_L(j,3), &
-                        basis_A(i, k), basis_A(j, l), &
-                        Ri, Rj )
+                        tmp = tmp + dprod * overlap_coeff_OS( &
+                              basis_L(i,1), basis_L(i,2), basis_L(i,3), &
+                              basis_L(j,1), basis_L(j,2), basis_L(j,3), &
+                              basis_A(i,k), basis_A(j,l), &
+                              Ri, Rj )
+                    end do
                 end do
+                S(i,j) = tmp
             end do
-    
-            S(i, j) = tmp
-            if (i /= j) S(j, i) = tmp
         end do
         !$acc end parallel loop
+        !$acc update self(S) async(1)
         !$acc end data
     
     end subroutine S_overlap

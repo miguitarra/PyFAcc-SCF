@@ -16,7 +16,7 @@ module nuclear
 contains
 
     function f(j,l,m,a,b) result(res)
-        !acc routine seq
+        !$acc routine seq
         integer, intent(in) :: j, l, m
         real(8), intent(in) :: a, b
         integer :: k
@@ -29,6 +29,7 @@ contains
     end function f
 
     function A(l,r,i,l1,l2,Ra,Rb,Rc,Rp,eps)
+        !$acc routine seq
         ! -------------------------------------
         ! Factor A
         ! -------------------------------------
@@ -62,6 +63,7 @@ contains
     end function A
 
     FUNCTION nuclear_coeff(ax,ay,az,bx,by,bz,aa,bb,Ra,Rb,Rn,Zn) result(Vnn)
+        !$acc routine seq
         ! -------------------------------------------------------------------------
         ! Compute electon-nucleus integral between two Cartesian Gaussian functions
         ! -------------------------------------------------------------------------
@@ -74,7 +76,7 @@ contains
         !
         !--------------------------------------------------------------------------
 
-        ! INPUT
+        ! INPUT        
         INTEGER, intent(in) :: ax, ay, az, bx, by, bz   ! Angular momentum coefficients
         REAL*8, intent(in) :: aa, bb                    ! Exponential Gaussian coefficients
         REAL*8, dimension(3), intent(in) :: Ra, Rb      ! Gaussian centers
@@ -116,9 +118,8 @@ contains
                                             AAz =  A(n,t,k,az,bz,Ra(3),Rb(3),Rn(3),Rp(3),eps)
 
                                             nu = l + m + n - 2 * (r + s + t) - (i + j + k)
-                                            call dboysfun12(DOT_PRODUCT(Rp-Rn,Rp-Rn), vals)
-                                            Vnn = Vnn + AAx * AAy * AAz * vals(nu)
 
+                                            Vnn = Vnn + AAx * AAy * AAz * boys(nu,g*DOT_PRODUCT(Rp-Rn,Rp-Rn))
                                         END DO ! k
                                     END DO ! t
                                 END DO ! n
@@ -133,7 +134,10 @@ contains
 
     END FUNCTION nuclear_coeff
 
-    subroutine V_nuclear(Kf, c, basis_functions, Rn, Zn, Nn,  V)
+    subroutine V_nuclear(Kf, c, basis_functions, Rn, Zn, Nn, V)
+        use iso_fortran_env
+        implicit none
+    
         integer, intent(in) :: Kf, c, Nn
         type(BasisFunction_type), intent(in) :: basis_functions(Kf)
         real(8), intent(in) :: Rn(3, Nn)
@@ -147,10 +151,20 @@ contains
     
         ! Loop variables
         integer :: i, j, k, l, n
-        real(8) :: tmp, dprod, dist2
+        real(8) :: dprod, dist2, tmp
         real(8), dimension(3) :: Ri, Rj
-        
-        ! Extract basis data
+    
+        ! 3D accumulation array
+        real(8), allocatable :: Vtmp(:,:,:)
+        real(8) :: V_local(Kf, Kf)
+    
+        ! Initialize output
+        V = 0.0d0
+        V_local = 0.0d0
+        allocate(Vtmp(Nn, Kf, Kf))
+        Vtmp = 0.0d0
+    
+        ! Extract basis data into plain arrays
         do i = 1, Kf
             basis_D(i,:) = basis_functions(i)%coefficients
             basis_A(i,:) = basis_functions(i)%exponents
@@ -158,21 +172,18 @@ contains
             basis_R(i,:) = basis_functions(i)%center
         end do
     
-        V(:,:) = 0.0D0
-    
+        !$acc data copyin(basis_D, basis_A, basis_L, basis_R, Rn, Zn), create(Vtmp) async(3)
+        !$acc parallel loop collapse(3) private(Ri, Rj, k, l, dprod, dist2, tmp) default(present) async(3)
         do n = 1, Nn
-    
-            !acc data copyin(basis_D, basis_A, basis_L, basis_R, Rn, Zn)
-            !acc parallel loop collapse(2) private(k,l,tmp,dprod,Ri,Rj,dist2) default(present)
             do i = 1, Kf
-                do j = i, Kf
+                do j = 1, Kf
                     Ri = basis_R(i,:)
                     Rj = basis_R(j,:)
-                    dist2 = (Ri(1) - Rj(1))**2 + (Ri(2) - Rj(2))**2 + (Ri(3) - Rj(3))**2
+                    dist2 = sum((Ri - Rj)**2)
     
                     if (dist2 > distance_cutoffn**2) cycle
     
-                    tmp = 0.0D0
+                    tmp = 0.0d0
                     do k = 1, c
                         do l = 1, c
                             dprod = basis_D(i,k) * basis_D(j,l)
@@ -185,17 +196,27 @@ contains
                                 Ri, Rj, Rn(:,n), Zn(n) )
                         end do
                     end do
-                    V(i,j) = V(i,j) + tmp
-                    if (i /= j) V(j,i) = V(j,i) + tmp
+                    Vtmp(n, i, j) = tmp
                 end do
             end do
-            !acc end parallel loop
-            !acc end data
-    
         end do
+        !$acc end parallel loop
+    
+        !$acc update self(Vtmp) async(3)
+        !$acc wait(3)
+    
+        ! Reduce Vtmp over n to get V_local
+        V_local = 0.0d0
+        do n = 1, Nn
+            V_local = V_local + Vtmp(n, :, :)
+        end do
+    
+        V = V + V_local
+        !$acc end data
+    
+        deallocate(Vtmp)
+    
     end subroutine V_nuclear
 
-
-
-
+    
 end module nuclear

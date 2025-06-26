@@ -1,6 +1,6 @@
 ! this module handles the fortran - cpp translation
 MODULE libint_f
-   USE ISO_C_BINDING, ONLY: C_DOUBLE, C_PTR, C_NULL_PTR, C_INT, C_FUNPTR, C_F_POINTER, C_F_PROCPOINTER, C_SIZE_T
+   USE ISO_C_BINDING
 
 #include <libint2/config.h>
 #include <libint2/util/generated/libint2_params.h>
@@ -98,6 +98,8 @@ MODULE libint_f
 #endif
 
    INTERFACE
+
+   
       SUBROUTINE libint2_static_init() BIND(C)
       END SUBROUTINE
 
@@ -293,6 +295,10 @@ MODULE libint_f
    END INTERFACE
 
 #ifdef INCLUDE_ERI
+
+    
+
+
 CONTAINS
    SUBROUTINE compute_eri_f(contrdepth, deriv_order, am1, c1, alpha1, A, &
                             am2, c2, alpha2, B, &
@@ -615,9 +621,11 @@ CONTAINS
 #endif
 
    IF ( ASSOCIATED(build_eri) ) CALL build_eri(erieval)
+   
 
    END SUBROUTINE
 #endif
+
 
 
 END MODULE

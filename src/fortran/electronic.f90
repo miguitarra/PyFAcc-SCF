@@ -160,8 +160,8 @@ contains
                                                                             cz,dz,Rc(3),Rd(3),Rq(3),g2,delta)
 
                                                                     nu = l+ll+m+mm+n+nn - 2*(r+rr+s+ss+t+tt) - (i + j + k)
-                                                                    call dboysfun12(doT_PRODUCT(Rp-Rq,Rp-Rq)*g1*g2/(g1+g2), vals)
-                                                                    G = G + BBx * BBy * BBz * vals(nu)
+                                                                    G = G + BBx * BBy * BBz * &
+                                                                                            boys(nu, dot_product(Rp - Rq, Rp - Rq) * g1)
 
                                                                 end do ! tt
                                                             end do ! nn
@@ -185,6 +185,7 @@ contains
         G = G * c1 * c2 * 2.0D0 * PI**2 / (g1 * g2) * SQRT(PI / (g1 + g2))
 
     end function electronic_coeff
+
 
     subroutine compute_ERI(mol, basis_function, n_unique, ERI_flat, eri_list)
     
@@ -253,6 +254,58 @@ contains
     end subroutine compute_ERI
 
 
+    function compute_eri_value(mu, nu, lam, sig, mol, basis_function) result(eri_val)
+        !$acc routine seq
+        ! Input
+        type(Molecule_type), intent(in) :: mol
+        type(BasisFunction_type), intent(in) :: basis_function(:)
+        
+        ! Locals
+        integer :: i, p1, p2, p3, p4
+        integer :: mu, nu, lam, sig
+        integer :: idx_eri
+        real(c_double) :: eri_val
+        real(c_double) :: coeff1, coeff2, coeff3, coeff4
+        real(c_double) :: exp1, exp2, exp3, exp4
+    
+        ! For basis function details
+        type(BasisFunction_type) :: bf1, bf2, bf3, bf4
+
+        bf1 = basis_function(mu)
+        bf2 = basis_function(nu)
+        bf3 = basis_function(lam)
+        bf4 = basis_function(sig)
+
+        eri_val = 0.0d0
+
+        do p1 = 1, size(bf1%exponents)
+            do p2 = 1, size(bf2%exponents)
+                do p3 = 1, size(bf3%exponents)
+                    do p4 = 1, size(bf4%exponents)
+                        exp1 = bf1%exponents(p1)
+                        exp2 = bf2%exponents(p2)
+                        exp3 = bf3%exponents(p3)
+                        exp4 = bf4%exponents(p4)
+
+                        coeff1 = bf1%coefficients(p1)
+                        coeff2 = bf2%coefficients(p2)
+                        coeff3 = bf3%coefficients(p3)
+                        coeff4 = bf4%coefficients(p4)
+
+                        eri_val = eri_val + coeff1 * coeff2 * coeff3 * coeff4 * &
+                                  electronic_coeff(bf1%ang_mom(1), bf1%ang_mom(2), bf1%ang_mom(3), &
+                                                   bf2%ang_mom(1), bf2%ang_mom(2), bf2%ang_mom(3), &
+                                                   bf3%ang_mom(1), bf3%ang_mom(2), bf3%ang_mom(3), &
+                                                   bf4%ang_mom(1), bf4%ang_mom(2), bf4%ang_mom(3), &
+                                                   exp1, exp2, exp3, exp4, &
+                                                   bf1%center, bf2%center, bf3%center, bf4%center)
+                    end do
+                end do
+            end do
+        end do
+
+
+    end function compute_eri_value
+
+    
 end module electronic
-
-

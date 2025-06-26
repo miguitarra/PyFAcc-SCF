@@ -12,7 +12,7 @@ module uscf
     use kinetic
     use eri_struct
     use electronic
-    use integrals
+    use libint_integrals
     implicit none
 
 
@@ -43,6 +43,7 @@ contains
         real(wp), allocatable :: eigvals(:), eigvecs(:,:)
         real(wp), allocatable :: ERI_flat(:)
         integer, allocatable :: eri_map(:,:)
+        integer, allocatable  :: index_map(:,:,:,:)
         real(wp) :: E_temp, ee_val1, ee_val2
 
 
@@ -70,6 +71,7 @@ contains
         allocate(F_alpha(nbf,nbf), F_beta(nbf,nbf), G_alpha(nbf,nbf), G_beta(nbf,nbf))
         allocate(eps_alpha(nbf), eps_beta(nbf), C_alpha(nbf,nbf), C_beta(nbf,nbf))
         allocate(eigvals(nbf), eigvecs(nbf,nbf))
+        allocate(index_map(nbf, nbf, nbf, nbf))
 
         !do x = 1, nbf
         !    print *, "Basis function:", x
@@ -83,54 +85,35 @@ contains
         !    call print_vector( basis_functions(x)%center, 3)
         !end do
 
-        
+        ! Build ERI index list
         nbf_sym = nbf*(nbf+1)/2
         n_unique = nbf_sym*(nbf_sym+1)/2
 
-        print *, "Total unique ERIs: ", n_unique
+        allocate(eri_list(n_unique), ERI_flat(n_unique+1))
+        ERI_flat = 0.0_wp
 
-        ! Second pass: populate eri_map (4 x n_unique)
-        allocate(eri_map(4, n_unique))
         idx = 0
-        !acc parallel loop collapse(4) present(eri_map) private(idx)
         do i = 1, nbf
             do j = 1, i
                 do k = 1, nbf
                     do l = 1, k
                         if ((i*(i-1)/2 + j) >= (k*(k-1)/2 + l)) then
-                            !acc atomic capture
                             idx = idx + 1
-                            eri_map(1, idx) = i
-                            eri_map(2, idx) = j
-                            eri_map(3, idx) = k
-                            eri_map(4, idx) = l
+                            eri_list(idx)%mu  = i
+                            eri_list(idx)%nu  = j
+                            eri_list(idx)%lam = k
+                            eri_list(idx)%sig = l
                         end if
                     end do
                 end do
             end do
-        end do
-
-        ! Now populate eri_list from eri_map
-        allocate(eri_list(n_unique), ERI_flat(n_unique+1))
-        ERI_flat = 0.0_wp
-
-        !acc parallel loop present(eri_list, eri_map)
-        do i = 1, n_unique
-            eri_list(i)%mu  = eri_map(1, i)
-            eri_list(i)%nu  = eri_map(2, i)
-            eri_list(i)%lam = eri_map(3, i)
-            eri_list(i)%sig = eri_map(4, i)
-        end do
-        deallocate(eri_map)
-        
+        end do 
 
         print *, "ERI list populated"
 
-        !acc data copyin(basis_functions, mol, mol%atomic_numbers, eri_list) &
-        !acc     create(S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat)
-        do i = 1, size(basis_functions)
-            !acc enter data copyin(basis_functions(i)%exponents, basis_functions(i)%coefficients, basis_functions(i)%center, basis_functions(i)%ang_mom)
-        end do
+        !acc data copyin(eri_list) &
+        !acc     create(S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat, index_map)
+        
 
         ! One-electron integrals
         call S_overlap(nbf, basis_set_n , basis_functions, S)
@@ -144,11 +127,13 @@ contains
         print *, "Full V matrix:" ! Potential
         call print_matrix(V, nbf)
 
+
         H = T + V  ! Compute core matrix
         print *, "One electron integrals computed"
 
         ! Compute ERIs
-        call compute_ERI_libint(mol, shells,  basis_functions, n_unique, ERI_flat, eri_list, basis_set_n)
+        call compute_ERI_libint(mol, shells,  basis_functions, n_unique, ERI_flat, eri_list, basis_set_n, index_map)
+        !$acc update device(index_map)
         print *, "Two-electron integrals computed"
 
         ! Initial Guess
@@ -172,8 +157,8 @@ contains
                     sum_gb = 0.0_wp
                     do lam = 1, nbf
                         do sig = 1, nbf
-                            ee_val1 = get_ERI(mu, nu, lam, sig, ERI_flat)
-                            ee_val2 = get_ERI(mu, sig, lam, nu, ERI_flat)
+                            ee_val1 = get_ERI(mu, nu, lam, sig, ERI_flat, index_map)
+                            ee_val2 = get_ERI(mu, sig, lam, nu, ERI_flat, index_map)
                             sum_ga = sum_ga + (D_alpha(lam,sig) + D_beta(lam,sig)) * ee_val1 - &
                                             D_alpha(lam,sig) * ee_val2
                             sum_gb = sum_gb + (D_alpha(lam,sig) + D_beta(lam,sig)) * ee_val1 - &
@@ -221,23 +206,22 @@ contains
             E_old = E_elec
         end do
         
-        do i = 1, size(basis_functions)
-            !acc exit data delete(basis_functions(i)%exponents, basis_functions(i)%coefficients, basis_functions(i)%center)
-        end do
-        !acc exit data delete(basis_functions, mol, mol%atomic_numbers, eri_list,S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat)
+
+        !acc exit data delete(eri_list,S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat, index_map)
         !acc end data
 
         final_energy = E_elec + mol%Enuc
 
 
         deallocate(S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, &
-                   D_alpha_old, D_beta_old, eps_alpha, eps_beta, C_alpha, C_beta, ERI_flat, eri_list)
+                   D_alpha_old, D_beta_old, eps_alpha, eps_beta, C_alpha, C_beta, ERI_flat, eri_list, index_map)
 
     end subroutine run_uscf
 
-    function get_ERI(mu, nu, lam, sig, ERI_flat) result(tei)
+    function get_ERI(mu, nu, lam, sig, ERI_flat, index_map) result(tei)
         integer, intent(in) :: mu, nu, lam, sig
         real(wp), dimension(:), intent(in) :: ERI_flat
+        integer, intent(in) :: index_map(:,:,:,:)
         real(wp) :: tei
         integer :: idx
     

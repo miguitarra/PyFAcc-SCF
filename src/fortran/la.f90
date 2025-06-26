@@ -21,7 +21,7 @@ contains
 
         if (info /= 0) then
             print *, "Diagonalization failed"
-            stop
+            !stop
         end if
     end subroutine diagonalize_symmetric
 

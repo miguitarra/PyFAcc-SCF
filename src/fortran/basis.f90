@@ -80,6 +80,7 @@ contains
                             basis_functions(count)%exponents = atom_bases(j)%shells(k)%exponents
                             basis_functions(count)%coefficients = atom_bases(j)%shells(k)%coefficients(:, 1)
                             basis_functions(count)%ang_mom = [0,0,0]
+                            basis_functions(count)%shell_idx = count_shell
                             
                             !------ Shell -----
                             shell(count_shell)%center = coords(:,i)
@@ -118,6 +119,7 @@ contains
                                 
                                 basis_functions(count)%ang_mom = 0
                                 basis_functions(count)%ang_mom(p) = 1
+                                basis_functions(count)%shell_idx = count_shell
 
                                 shell(count_shell)%bf_idx(p) = count
                                 
@@ -148,6 +150,7 @@ contains
                                 allocate(basis_functions(count)%coefficients(size(atom_bases(j)%shells(k)%exponents)))
                                 basis_functions(count)%exponents = atom_bases(j)%shells(k)%exponents
                                 basis_functions(count)%coefficients = atom_bases(j)%shells(k)%coefficients(:, 2)
+                                basis_functions(count)%shell_idx = count_shell
                                 select case(d)
                                 case(1); basis_functions(count)%ang_mom = [2, 0, 0]  ! xx
                                 case(2); basis_functions(count)%ang_mom = [0, 2, 0]  ! yy
@@ -171,6 +174,7 @@ contains
                             basis_functions(count)%exponents = atom_bases(j)%shells(k)%exponents
                             basis_functions(count)%coefficients = atom_bases(j)%shells(k)%coefficients(:, 1)
                             basis_functions(count)%ang_mom = [0,0,0]
+                            basis_functions(count)%shell_idx = count_shell
 
                             ! ------ Shell -----
                             shell(count_shell)%center = coords(:,i)
