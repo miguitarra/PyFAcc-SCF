@@ -111,8 +111,8 @@ contains
 
         print *, "ERI list populated"
 
-        !acc data copyin(eri_list) &
-        !acc     create(S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat, index_map)
+        !$acc data copyin(eri_list) &
+        !$acc     create(S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat, index_map)
         
 
         ! One-electron integrals
@@ -120,20 +120,21 @@ contains
         call T_kinetic(nbf, basis_set_n, basis_functions, T)
         call V_nuclear(nbf, basis_set_n, basis_functions, mol%coords, mol%atomic_numbers, mol%natoms, V)
 
-        print *, "Full S matrix:" ! Overlap
-        call print_matrix(S, nbf)
-        print *, "Full T matrix:" ! Kinetic 
-        call print_matrix(T, nbf)
-        print *, "Full V matrix:" ! Potential
-        call print_matrix(V, nbf)
+        !print *, "Full S matrix:" ! Overlap
+        !call print_matrix(S, nbf)
+        !print *, "Full T matrix:" ! Kinetic 
+        !call print_matrix(T, nbf)
+        !print *, "Full V matrix:" ! Potential
+        !call print_matrix(V, nbf)
 
 
         H = T + V  ! Compute core matrix
         print *, "One electron integrals computed"
 
         ! Compute ERIs
-        call compute_ERI_libint(mol, shells,  basis_functions, n_unique, ERI_flat, eri_list, basis_set_n, index_map)
-        !$acc update device(index_map)
+        call libint2_static_init()
+        call compute_ERI_libint2(mol, shells,  basis_functions, n_unique, ERI_flat, eri_list, basis_set_n, index_map)
+        !$acc update device(index_map, ERI_flat)
         print *, "Two-electron integrals computed"
 
         ! Initial Guess
@@ -149,8 +150,8 @@ contains
             G_alpha = 0.0_wp
             G_beta  = 0.0_wp
 
-            !acc update device(D_alpha, D_beta)
-            !acc parallel loop collapse(2) private(sum_ga, sum_gb) present(D_alpha, D_beta, G_alpha, G_beta)
+            !$acc update device(D_alpha, D_beta)
+            !$acc parallel loop collapse(2) gang vector private(sum_ga, sum_gb) present(D_alpha, D_beta, G_alpha, G_beta, ERI_flat, index_map)
             do mu = 1, nbf
                 do nu = 1, nbf
                     sum_ga = 0.0_wp
@@ -169,7 +170,7 @@ contains
                     G_beta(mu,nu)  = sum_gb
                 end do
             end do
-            !acc update self(G_alpha, G_beta)
+            !$acc update self(G_alpha, G_beta)
 
             F_alpha = H + G_alpha
             F_beta  = H + G_beta
@@ -184,8 +185,8 @@ contains
             D_beta  = matmul(C_beta(:,1:n_beta),  transpose(C_beta(:,1:n_beta)))
 
             E_temp = 0.0_wp
-            !acc update device(D_alpha, D_beta, H, F_alpha, F_beta)
-            !acc parallel loop collapse(2) reduction(+:E_temp) present(D_alpha, D_beta, H, F_alpha, F_beta) 
+            !$acc update device(D_alpha, D_beta, H, F_alpha, F_beta)
+            !$acc parallel loop collapse(2) reduction(+:E_temp) present(D_alpha, D_beta, H, F_alpha, F_beta) 
             do mu = 1, nbf
                 do nu = 1, nbf
                     E_temp = E_temp + 0.5_wp * (D_alpha(mu,nu) + D_beta(mu,nu)) * H(mu,nu)
@@ -207,8 +208,8 @@ contains
         end do
         
 
-        !acc exit data delete(eri_list,S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat, index_map)
-        !acc end data
+        !$acc exit data delete(eri_list,S, T, V, H, D_alpha, D_beta, F_alpha, F_beta, G_alpha, G_beta, ERI_flat, index_map)
+        !$acc end data
 
         final_energy = E_elec + mol%Enuc
 
