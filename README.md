@@ -1,5 +1,5 @@
 # CPU/GPU acceleration of SCF module
-This repository contains the code produced during a Project in Practice at the University of Copenhagen in collaboration with Molecular Quantum Solutions (MQS) during the Spring block of 2025.
+This repository contains the code produced during a Project in Practice and a later MSc Thesis project at the University of Copenhagen in collaboration with Molecular Quantum Solutions (MQS) from April 2025 to May 2026.
 
 
 ---
@@ -7,8 +7,10 @@ This repository contains the code produced during a Project in Practice at the U
 > Miguel Alonso (Owner): mi.alonso.mediavilla@gmail.com
 
 ---
+## Objectives
+Creation of a multi-language GPU-accelerated SCF routine for the study of molecular systems. Usage of OpenACC/OpenMP/OpenMPI to adapt to heterogeneous systems and different accelerators. 
 
-## Features
+## Current Features
 - Usage of STO-{2-6}g basis sets.
 - .XYZ input file support.
 - Calculation of SCF energy for unrestricted (open-shell) and restricted (closed-shell) systems.
@@ -51,6 +53,8 @@ From there on, one can use the included Python file to run SCF simulations on th
 ---
 
 ## Future Improvements and Next Steps
+- Addition of Schwarz screening to ERI computations.
+- Focus on ERI computations: research on advanced techniques, higher GPU offloading. HGP algorithm for ERI computation following ["Advanced Techniques for High-Performance Fock Matrix Construction on GPU Clusters"](https://pubs.acs.org/doi/10.1021/acs.jctc.4c00994).
+- Multi-GPU support via MPI.
 - Possible usage of cuSOLVER for eigenvalue-like and linear algebra calculations (fully CUDA package from Nvidia).
-- Focus on ERI computations: research on advanced techniques, higher GPU offloading.
-- Investigate Fock Matrix building techniques.
+- Expansion to other Basis Sets (e.g., cc-pVDZ, cc-pVTZ).
