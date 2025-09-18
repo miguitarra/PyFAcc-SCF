@@ -87,17 +87,16 @@ def compute_spin_electrons(atoms, charge=0):
     return n_alpha, n_beta, multiplicity
 
 
-def run_scf(lib, atom_file, eps_scf, max_iter, final_energy, basis_set):
+def run_scf(lib, atom_file, eps_scf, max_iter, final_energy, basis_set, charge = 0):
     from ctypes import c_int, c_double, POINTER, byref, create_string_buffer
 
     # Read atomic data from XYZ file
     natoms, coords, species_list = read_xyz(atom_file)
 
     # Compute electronic information
-    nalpha, nbeta, _ = compute_spin_electrons(species_list)
+    nalpha, nbeta, _ = compute_spin_electrons(species_list, charge)
     nelectrons = nalpha + nbeta
     
-    basis_set_n = int(basis_set[-2])  # e.g., "sto-3g" → 3
 
     # Convert species to atomic numbers
     z_num_list = symbols_to_z(species_list)
@@ -122,8 +121,10 @@ def run_scf(lib, atom_file, eps_scf, max_iter, final_energy, basis_set):
     nbeta_c = c_int(nbeta)
     eps_scf_c = c_double(eps_scf)
     max_iter_c = c_int(max_iter)
+    charge_c = c_int(charge)
     final_energy_c = c_double(0.0)
-    basis_set_n_c = c_int(basis_set_n)
+    basis_set_c = basis_set.encode('utf-8')
+
 
     # Print all information being passed
     '''
@@ -142,7 +143,7 @@ def run_scf(lib, atom_file, eps_scf, max_iter, final_energy, basis_set):
     print("============================\n")'''
 
     # Call the C wrapper
-    lib.run_scf_c(natoms_c, nelectrons_c, nalpha_c, nbeta_c, species_c_array, coords_c,
-                  eps_scf_c, max_iter_c, byref(final_energy_c), byref(basis_set_n_c), z_num_c)
+    lib.run_scf_c(natoms_c, nelectrons_c, charge_c, nalpha_c, nbeta_c, species_c_array, coords_c,
+                  eps_scf_c, max_iter_c, byref(final_energy_c), basis_set_c, z_num_c)
 
     return final_energy_c.value

@@ -57,4 +57,20 @@ contains
     end subroutine orthonormal_diagonalize
 
 
+    subroutine idx_upper_triangular(n, idx, i, j)
+        !$acc routine seq
+        integer, intent(in) :: n, idx ! n for n x n matrix, idx linear index
+        integer, intent(out) :: i, j ! i,j location
+        integer :: k
+    
+        k = n
+        i = 1
+        j = idx
+        do while (j > k)
+            j = j - k
+            k = k - 1
+            i = i + 1
+        end do
+        j = i + j - 1
+    end subroutine
 end module la
