@@ -1,5 +1,5 @@
-# CPU/GPU acceleration of SCF module
-This repository contains the code produced during a Project in Practice and a later MSc Thesis project at the University of Copenhagen in collaboration with Molecular Quantum Solutions (MQS) from April 2025 to May 2026.
+# PyFAcc-SCF
+This repository contains the Python Fortran Accelerated Self-Consistent Field (PyFAcc-SCF) project. This repository was created as part of a Project in Practice and a later MSc Thesis project at the University of Copenhagen in collaboration with Molecular Quantum Solutions (MQS) from April 2025 to May 2026.
 
 
 ---

@@ -6,7 +6,7 @@ module boys
 contains
 
 
-    FUNCTION boys(nu, x)
+    pure FUNCTION boys(nu, x)
         !$acc routine seq
         INTEGER, INTENT(IN) :: nu
         REAL*8, INTENT(IN)  :: x
@@ -51,8 +51,9 @@ contains
         real(8), intent(in) :: centers(4,3), alphas(4,contrdepth), coeffs(4, contrdepth)
     
         integer :: nF, Np
-        integer :: n, p1, p2, p3, p4, p1234
-        real(C_DOUBLE) :: x
+        integer :: p1, p2, p3, p4, p1234
+        integer, value :: n
+        real(C_DOUBLE), value :: x
 
     
         nF = am1 + am2 + am3 + am4 + 1 + deriv_order

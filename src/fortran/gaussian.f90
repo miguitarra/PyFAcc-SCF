@@ -1,6 +1,5 @@
 module gaussian
     use iso_c_binding
-    use molecule_struct
     use openacc
     use constants_struct
     use utils

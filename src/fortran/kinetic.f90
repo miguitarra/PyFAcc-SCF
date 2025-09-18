@@ -6,8 +6,7 @@ module kinetic
     use utils
     use gaussian
     use overlap
-    use basis_function_struct
-    use molecule_struct
+    use basis_struct
     use openacc
 
     implicit none
@@ -54,55 +53,163 @@ contains
         K = K * norm(ax, ay, az, aa) * norm(bx, by, bz, bb)
     end function kinetic_coeff
 
-    subroutine T_kinetic(Kf, c, basis_functions, T)
-        integer, intent(in) :: Kf, c
-        type(BasisFunction_type), intent(in) :: basis_functions(Kf)
-        real(8), intent(out) :: T(Kf, Kf)
+    subroutine compute_kinetic_shell_pair(xA, xB, yA, yB, zA, zB, lA, lB, startA, endA, startB, endB, exponents, coefficients, T_block)
+        !$acc routine seq
+        ! Inputs
+        integer, intent(in) :: lA, lB, startA, endA, startB, endB
+        real(wp), intent(in) :: xA, xB, yA, yB, zA, zB
+        real(wp), intent(in) :: exponents(:), coefficients(:)
     
-        real(8) :: basis_D(Kf, c), basis_A(Kf, c)
-        integer :: basis_L(Kf, 3)
-        real(8) :: basis_R(Kf, 3)
+        ! Output
+        real(wp), intent(out) :: T_block(:,:)   ! (nA, nB)
     
-        integer :: i, j, k, l
-        real(8) :: tmp, dprod, dist2
-        real(8) :: Ri(3), Rj(3)
+        ! Local variables
+        integer :: nA, nB
+        integer :: muA, muB
+        integer :: axA, ayA, azA, axB, ayB, azB
+        integer :: kA, kB
+        real(wp) :: tmp
+        real(wp), dimension(3) :: RA, RB
     
-        ! Extract basis data
-        do i = 1, Kf
-            basis_D(i,:) = basis_functions(i)%coefficients
-            basis_A(i,:) = basis_functions(i)%exponents
-            basis_L(i,:) = basis_functions(i)%ang_mom
-            basis_R(i,:) = basis_functions(i)%center
-        end do
-        
-        !$acc data copyin(basis_D, basis_A, basis_L, basis_R) async(2)
-        !$acc parallel loop collapse(2) private(k, l, tmp, dprod, Ri, Rj, dist2) default(present) async(2)
-        do i = 1, Kf
-            do j = 1, Kf
-                Ri = basis_R(i, :)
-                Rj = basis_R(j, :)
-                dist2 = sum((Ri(:) - Rj(:))**2)
+        ! Fixed-size arrays for angular momenta
+        integer, parameter :: l_max = 3               ! adjust to max l in your shells
+        integer, parameter :: nAmax = (l_max+1)*(l_max+2)/2
+        integer, parameter :: nBmax = (l_max+1)*(l_max+2)/2
+        integer :: angmomA(nAmax,3)
+        integer :: angmomB(nBmax,3)
     
-                if (dist2 > distance_cutoffk**2) cycle
+        ! Number of basis functions in each shell
+        nA = (lA + 1)*(lA + 2)/2
+        nB = (lB + 1)*(lB + 2)/2
     
-                tmp = 0.0D0
-                do k = 1, c
-                    do l = 1, c
-                        dprod = basis_D(i,k) * basis_D(j,l)
-                        if (abs(dprod) < screen_thresholdk) cycle
+        ! Shell centers
+        RA = [xA, yA, zA]
+        RB = [xB, yB, zB]
     
-                        tmp = tmp + dprod * kinetic_coeff( &
-                              basis_L(i,1), basis_L(i,2), basis_L(i,3), &
-                              basis_L(j,1), basis_L(j,2), basis_L(j,3), &
-                              basis_A(i,k), basis_A(j,l), &
-                              Ri, Rj )
+        ! Generate Cartesian angular momenta
+        call generate_cartesian_angmoms(lA, angmomA)
+        call generate_cartesian_angmoms(lB, angmomB)
+    
+        ! Loop over basis function pairs
+        do muA = 1, nA
+            axA = angmomA(muA,1)
+            ayA = angmomA(muA,2)
+            azA = angmomA(muA,3)
+            do muB = 1, nB
+                axB = angmomB(muB,1)
+                ayB = angmomB(muB,2)
+                azB = angmomB(muB,3)
+                tmp = 0.0_wp
+                do kA = startA, endA
+                    do kB = startB, endB
+                        tmp = tmp + coefficients(kA) * coefficients(kB) &
+                              * kinetic_coeff(axA, ayA, azA, axB, ayB, azB, &
+                                                 exponents(kA), exponents(kB), RA, RB)
                     end do
                 end do
-                T(i,j) = tmp
+                T_block(muA, muB) = tmp
             end do
         end do
-        !$acc end parallel loop
-        !$acc update self(T) async(2)
+    
+    end subroutine compute_kinetic_shell_pair
+    
+
+    subroutine T_kinetic(mol, shells, T)
+        type(Molecule_type), intent(in) :: mol
+        type(Shell_type), intent(in) :: shells(:)
+        real(8), intent(out) :: T(:, :)
+    
+        integer :: n_shells, sA, sB, nA, nB, muA, muB, gA, gB, idx, i, j
+        integer :: prim_index, coeffA_start, coeffA_end, coeffB_start, coeffB_end
+        integer, allocatable :: shell_start(:)
+        integer, allocatable :: prim_start(:)
+        integer :: total_prim
+        real(wp), allocatable :: T_block(:,:)
+        real(wp), allocatable :: shell_x(:), shell_y(:), shell_z(:), shell_coeff(:), shell_exp(:)
+        integer, allocatable :: shell_prim(:), shell_l(:)
+        integer :: n_upper
+    
+        n_shells = size(shells)
+        allocate(shell_start(n_shells+1))
+        allocate(shell_prim(n_shells), shell_l(n_shells), shell_x(n_shells), shell_y(n_shells), shell_z(n_shells))
+    
+        ! compute total number of primitives and prim_start array
+        total_prim = 0
+        do sA = 1, n_shells
+            total_prim = total_prim + shells(sA)%num_prim
+        end do
+        allocate(shell_coeff(total_prim), shell_exp(total_prim))
+        allocate(prim_start(n_shells+1))
+    
+        ! fill arrays to make it OpenACC compatible
+        shell_start(1) = 1
+        prim_index = 1
+        prim_start(1) = 1
+        do sA = 1, n_shells
+            shell_x(sA) = shells(sA)%x
+            shell_y(sA) = shells(sA)%y
+            shell_z(sA) = shells(sA)%z
+            shell_prim(sA) = shells(sA)%num_prim
+            shell_l(sA) = shells(sA)%l_num
+    
+            ! correct slice: prim_index : prim_index + num_prim - 1
+            shell_coeff(prim_index : prim_index + shell_prim(sA) - 1) = shells(sA)%coefficients
+            shell_exp  (prim_index : prim_index + shell_prim(sA) - 1) = shells(sA)%exponents
+    
+            prim_index = prim_index + shell_prim(sA)
+            prim_start(sA+1) = prim_index
+    
+            nA = (shell_l(sA) + 1)*(shell_l(sA) + 2)/2
+            shell_start(sA+1) = shell_start(sA) + nA
+        end do
+    
+        T(:,:) = 0.0_wp
+        n_upper = n_shells * (n_shells + 1) / 2
+    
+        
+        !$acc data copyin(shell_x, shell_y, shell_z, shell_l, shell_coeff, shell_prim, shell_exp, shell_start, prim_start) async(2)
+        !$acc parallel loop private(sA, sB, nA, nB, coeffA_start, coeffA_end, coeffB_start, coeffB_end, muA, muB, gA, gB) default(present) async(2)
+        do idx = 1, n_upper
+            call idx_upper_triangular(n_shells, idx, sA, sB)
+            nA = (shell_l(sA) + 1)*(shell_l(sA) + 2)/2
+            nB = (shell_l(sB) + 1)*(shell_l(sB) + 2)/2
+    
+            coeffA_start = prim_start(sA)
+            coeffA_end   = prim_start(sA+1) - 1
+            coeffB_start = prim_start(sB)
+            coeffB_end   = prim_start(sB+1) - 1
+    
+            allocate(T_block(nA, nB))
+    
+            call compute_kinetic_shell_pair(shell_x(sA), shell_x(sB), &
+                                           shell_y(sA), shell_y(sB), &
+                                           shell_z(sA), shell_z(sB), &
+                                           shell_l(sA), shell_l(sB), &
+                                           coeffA_start, coeffA_end, &
+                                           coeffB_start, coeffB_end, &
+                                           shell_exp, shell_coeff, T_block)
+    
+            do muA = 1, nA
+                gA = shell_start(sA) + muA - 1
+                do muB = 1, nB
+                    gB = shell_start(sB) + muB - 1
+    
+                    T(gA, gB) = T_block(muA, muB)
+                end do
+            end do
+    
+            deallocate(T_block)
+    
+        end do
+        !$acc end parallel loop 
+        !$acc update host(T)
+    
+        do i = 1, size(T, 1)
+            do j = i+1, size(T, 1)
+                T(j, i) = T(i, j)
+            end do
+        end do
+
         !$acc end data
     end subroutine T_kinetic
 

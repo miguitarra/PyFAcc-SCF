@@ -2,9 +2,10 @@ module nuclear
     use constants_struct
     use gaussian
     use overlap
-    use basis_function_struct
-    use molecule_struct
+    use basis_struct
     use openacc
+    use cartesian
+    use la
     use utils
     use io
     use boys
@@ -134,88 +135,196 @@ contains
 
     END FUNCTION nuclear_coeff
 
-    subroutine V_nuclear(Kf, c, basis_functions, Rn, Zn, Nn, V)
-        use iso_fortran_env
-        implicit none
+    subroutine compute_nuclear_shell_pair(xA, xB, yA, yB, zA, zB, lA, lB, startA, endA, startB, endB, exponents, coefficients, atom_x, atom_y, atom_z, Zn, V_block)
+        !$acc routine seq
+        ! Inputs
+        integer, intent(in) :: lA, lB, startA, endA, startB, endB, Zn
+        real(wp), intent(in) :: xA, xB, yA, yB, zA, zB, atom_x, atom_y, atom_z
+        real(wp), intent(in) :: exponents(:), coefficients(:)
     
-        integer, intent(in) :: Kf, c, Nn
-        type(BasisFunction_type), intent(in) :: basis_functions(Kf)
-        real(8), intent(in) :: Rn(3, Nn)
-        integer, intent(in) :: Zn(Nn)
-        real(8), intent(out) :: V(Kf, Kf)
+        ! Output
+        real(wp), intent(out) :: V_block(:,:)   ! (nA, nB)
     
-        ! Local copies of basis information
-        real(8) :: basis_D(Kf, c), basis_A(Kf, c)
-        integer :: basis_L(Kf, 3)
-        real(8) :: basis_R(Kf, 3)
+        ! Local variables
+        integer :: nA, nB
+        integer :: muA, muB
+        integer :: axA, ayA, azA, axB, ayB, azB
+        integer :: kA, kB
+        real(wp) :: tmp
+        real(wp), dimension(3) :: RA, RB, Rn
     
-        ! Loop variables
-        integer :: i, j, k, l, n
-        real(8) :: dprod, dist2, tmp
-        real(8), dimension(3) :: Ri, Rj
+        ! Fixed-size arrays for angular momenta
+        integer, parameter :: l_max = 3               ! adjust to max l in your shells
+        integer, parameter :: nAmax = (l_max+1)*(l_max+2)/2
+        integer, parameter :: nBmax = (l_max+1)*(l_max+2)/2
+        integer :: angmomA(nAmax,3)
+        integer :: angmomB(nBmax,3)
     
-        ! 3D accumulation array
-        real(8), allocatable :: Vtmp(:,:,:)
-        real(8) :: V_local(Kf, Kf)
+        ! Number of basis functions in each shell
+        nA = (lA + 1)*(lA + 2)/2
+        nB = (lB + 1)*(lB + 2)/2
     
-        ! Initialize output
-        V = 0.0d0
-        V_local = 0.0d0
-        allocate(Vtmp(Nn, Kf, Kf))
-        Vtmp = 0.0d0
+        ! Shell centers
+        RA = [xA, yA, zA]
+        RB = [xB, yB, zB]
+        Rn = [atom_x, atom_y, atom_z]
     
-        ! Extract basis data into plain arrays
-        do i = 1, Kf
-            basis_D(i,:) = basis_functions(i)%coefficients
-            basis_A(i,:) = basis_functions(i)%exponents
-            basis_L(i,:) = basis_functions(i)%ang_mom
-            basis_R(i,:) = basis_functions(i)%center
+        ! Generate Cartesian angular momenta
+        call generate_cartesian_angmoms(lA, angmomA)
+        call generate_cartesian_angmoms(lB, angmomB)
+    
+        ! Loop over basis function pairs
+        do muA = 1, nA
+            axA = angmomA(muA,1)
+            ayA = angmomA(muA,2)
+            azA = angmomA(muA,3)
+            do muB = 1, nB
+                axB = angmomB(muB,1)
+                ayB = angmomB(muB,2)
+                azB = angmomB(muB,3)
+                tmp = 0.0_wp
+                do kA = startA, endA
+                    do kB = startB, endB
+                        tmp = tmp + coefficients(kA) * coefficients(kB) &
+                              * nuclear_coeff(axA, ayA, azA, axB, ayB, azB, &
+                                                 exponents(kA), exponents(kB), RA, RB, Rn, Zn)
+                    end do
+                end do
+                V_block(muA, muB) = tmp
+            end do
         end do
     
-        !$acc data copyin(basis_D, basis_A, basis_L, basis_R, Rn, Zn), create(Vtmp) async(3)
-        !$acc parallel loop collapse(3) private(Ri, Rj, k, l, dprod, dist2, tmp) default(present) async(3)
+    end subroutine compute_nuclear_shell_pair
+
+! ------------------------------------------------------------------------
+
+
+    subroutine V_nuclear(mol, shells, V)
+        ! input
+        type(Molecule_type), intent(in) :: mol
+        type(Shell_type), intent(in) :: shells(:)
+        real(wp), intent(out) :: V(:,:)
+        
+        ! local
+        integer :: n_shells, sA, sB, nA, nB, muA, muB, gA, gB, idx, i, j, n, Nn
+        integer :: prim_index, coeffA_start, coeffA_end, coeffB_start, coeffB_end
+        integer, allocatable :: shell_start(:)
+        integer, allocatable :: prim_start(:)
+        integer :: total_prim
+        real(wp), allocatable :: V_block(:,:)
+        real(wp), allocatable :: shell_x(:), shell_y(:), shell_z(:), shell_coeff(:), shell_exp(:), atom_x(:), atom_y(:), atom_z(:)
+        integer, allocatable :: Z_atom(:)
+        integer, allocatable :: shell_prim(:), shell_l(:)
+        integer :: n_upper
+
+
+        real(wp), allocatable :: Vtmp(:,:,:)
+        
+
+        
+        n_shells = size(shells)
+        Nn = mol%n_atoms
+        allocate(shell_start(n_shells+1))
+        allocate(shell_prim(n_shells), shell_l(n_shells), shell_x(n_shells), shell_y(n_shells), shell_z(n_shells))
+    
+        ! compute total number of primitives and prim_start array
+        total_prim = 0
+        do sA = 1, n_shells
+            total_prim = total_prim + shells(sA)%num_prim
+        end do
+        allocate(shell_coeff(total_prim), shell_exp(total_prim))
+        allocate(prim_start(n_shells+1))
+
+    
+        ! fill arrays to make it OpenACC compatible - shell side
+        shell_start(1) = 1
+        prim_index = 1
+        prim_start(1) = 1
+        do sA = 1, n_shells
+            shell_x(sA) = shells(sA)%x
+            shell_y(sA) = shells(sA)%y
+            shell_z(sA) = shells(sA)%z
+            shell_prim(sA) = shells(sA)%num_prim
+            shell_l(sA) = shells(sA)%l_num
+    
+            ! correct slice: prim_index : prim_index + num_prim - 1
+            shell_coeff(prim_index : prim_index + shell_prim(sA) - 1) = shells(sA)%coefficients
+            shell_exp  (prim_index : prim_index + shell_prim(sA) - 1) = shells(sA)%exponents
+    
+            prim_index = prim_index + shell_prim(sA)
+            prim_start(sA+1) = prim_index
+    
+            nA = (shell_l(sA) + 1)*(shell_l(sA) + 2)/2
+            shell_start(sA+1) = shell_start(sA) + nA
+        end do
+
+        ! fill arrays to make it OpenACC compatible - mol/atoms
+        print *, "got here!"
+        atom_x = mol%atoms(:)%x
+        print *, atom_x
+        atom_y = mol%atoms(:)%y
+        atom_z = mol%atoms(:)%z
+        Z_atom = mol%atoms(:)%z_num
+
+
+        V(:,:) = 0.0_wp
+        allocate(Vtmp(Nn, size(V, 1), size(V, 2)))
+        Vtmp = 0.0_wp
+        n_upper = n_shells * (n_shells + 1) / 2
+    
+        
+        !$acc data copyin(shell_x, shell_y, shell_z, shell_l, shell_coeff, shell_prim, shell_exp, shell_start, prim_start, atom_x, atom_y, atom_z, Z_atom) create(Vtmp) async(3)
+        !$acc parallel loop collapse(2) private(sA, sB, nA, nB, coeffA_start, coeffA_end, coeffB_start, coeffB_end, muA, muB, gA, gB) default(present) async(3)
         do n = 1, Nn
-            do i = 1, Kf
-                do j = 1, Kf
-                    Ri = basis_R(i,:)
-                    Rj = basis_R(j,:)
-                    dist2 = sum((Ri - Rj)**2)
-    
-                    if (dist2 > distance_cutoffn**2) cycle
-    
-                    tmp = 0.0d0
-                    do k = 1, c
-                        do l = 1, c
-                            dprod = basis_D(i,k) * basis_D(j,l)
-                            if (abs(dprod) < screen_thresholdn) cycle
-    
-                            tmp = tmp + dprod * nuclear_coeff( &
-                                basis_L(i,1), basis_L(i,2), basis_L(i,3), &
-                                basis_L(j,1), basis_L(j,2), basis_L(j,3), &
-                                basis_A(i,k), basis_A(j,l), &
-                                Ri, Rj, Rn(:,n), Zn(n) )
-                        end do
+            do idx = 1, n_upper
+                call idx_upper_triangular(n_shells, idx, sA, sB)
+                nA = (shell_l(sA) + 1)*(shell_l(sA) + 2)/2
+                nB = (shell_l(sB) + 1)*(shell_l(sB) + 2)/2
+        
+                coeffA_start = prim_start(sA)
+                coeffA_end   = prim_start(sA+1) - 1
+                coeffB_start = prim_start(sB)
+                coeffB_end   = prim_start(sB+1) - 1
+        
+                allocate(V_block(nA, nB))
+        
+                call compute_nuclear_shell_pair(shell_x(sA), shell_x(sB), &
+                                               shell_y(sA), shell_y(sB), &
+                                               shell_z(sA), shell_z(sB), &
+                                               shell_l(sA), shell_l(sB), &
+                                               coeffA_start, coeffA_end, &
+                                               coeffB_start, coeffB_end, &
+                                               shell_exp, shell_coeff, atom_x(n), atom_y(n), atom_z(n), Z_atom(n), V_block)
+        
+                do muA = 1, nA
+                    gA = shell_start(sA) + muA - 1
+                    do muB = 1, nB
+                        gB = shell_start(sB) + muB - 1
+        
+                        Vtmp(n,gA, gB) = V_block(muA, muB)
                     end do
-                    Vtmp(n, i, j) = tmp
                 end do
+        
+                deallocate(V_block)
+        
             end do
         end do
         !$acc end parallel loop
-    
-        !$acc update self(Vtmp) async(3)
-        !$acc wait(3)
-    
-        ! Reduce Vtmp over n to get V_local
-        V_local = 0.0d0
+        !$acc update host(Vtmp)
+
+        V = 0.0_wp
         do n = 1, Nn
-            V_local = V_local + Vtmp(n, :, :)
+            V = V + Vtmp(n, :, :)
         end do
     
-        V = V + V_local
+        do i = 1, size(V, 1)
+            do j = i+1, size(V, 1)
+                V(j, i) = V(i, j)
+            end do
+        end do
+
         !$acc end data
-    
-        deallocate(Vtmp)
-    
+        
     end subroutine V_nuclear
 
     

@@ -7,6 +7,7 @@ module electronic
     use boys
     implicit none
 
+    real(8), parameter :: threshold = 1.0D-10
 contains
 
     pure function ij_index(i, j) result(index)
@@ -93,6 +94,7 @@ contains
     end function B
     
     function electronic_coeff(ax,ay,az,bx,by,bz,cx,cy,cz,dx,dy,dz,aa,bb,cc,dd,Ra,Rb,Rc,Rd) result(G)
+        !$acc routine seq
         !--------------------------------------------------------------------------
         ! Compute electron-electron integral between two cartesia Gaussian function
         !--------------------------------------------------------------------------
@@ -267,17 +269,21 @@ contains
         real(c_double) :: eri_val
         real(c_double) :: coeff1, coeff2, coeff3, coeff4
         real(c_double) :: exp1, exp2, exp3, exp4
+        real(c_double) :: product_coeffs
     
         ! For basis function details
         type(BasisFunction_type) :: bf1, bf2, bf3, bf4
-
+    
+        ! Threshold for screening
+        real(c_double), parameter :: threshold = 1.0d-12
+    
         bf1 = basis_function(mu)
         bf2 = basis_function(nu)
         bf3 = basis_function(lam)
         bf4 = basis_function(sig)
-
+    
         eri_val = 0.0d0
-
+    
         do p1 = 1, size(bf1%exponents)
             do p2 = 1, size(bf2%exponents)
                 do p3 = 1, size(bf3%exponents)
@@ -286,25 +292,29 @@ contains
                         exp2 = bf2%exponents(p2)
                         exp3 = bf3%exponents(p3)
                         exp4 = bf4%exponents(p4)
-
+    
                         coeff1 = bf1%coefficients(p1)
                         coeff2 = bf2%coefficients(p2)
                         coeff3 = bf3%coefficients(p3)
                         coeff4 = bf4%coefficients(p4)
-
+    
+                        product_coeffs = abs(coeff1 * coeff2 * coeff3 * coeff4)
+                        
+                        ! === SCREENING based on product of coefficients ===
+                        if (product_coeffs < threshold) cycle
+    
                         eri_val = eri_val + coeff1 * coeff2 * coeff3 * coeff4 * &
-                                  electronic_coeff(bf1%ang_mom(1), bf1%ang_mom(2), bf1%ang_mom(3), &
-                                                   bf2%ang_mom(1), bf2%ang_mom(2), bf2%ang_mom(3), &
-                                                   bf3%ang_mom(1), bf3%ang_mom(2), bf3%ang_mom(3), &
-                                                   bf4%ang_mom(1), bf4%ang_mom(2), bf4%ang_mom(3), &
-                                                   exp1, exp2, exp3, exp4, &
-                                                   bf1%center, bf2%center, bf3%center, bf4%center)
+                            electronic_coeff(bf1%ang_mom(1), bf1%ang_mom(2), bf1%ang_mom(3), &
+                                             bf2%ang_mom(1), bf2%ang_mom(2), bf2%ang_mom(3), &
+                                             bf3%ang_mom(1), bf3%ang_mom(2), bf3%ang_mom(3), &
+                                             bf4%ang_mom(1), bf4%ang_mom(2), bf4%ang_mom(3), &
+                                             exp1, exp2, exp3, exp4, &
+                                             bf1%center, bf2%center, bf3%center, bf4%center)
                     end do
                 end do
             end do
         end do
-
-
+    
     end function compute_eri_value
 
     

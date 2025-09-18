@@ -620,8 +620,7 @@ CONTAINS
       IF (deriv_order == 2) CALL C_F_PROCPOINTER(libint2_build_eri2(am4, am3, am2, am1), build_eri)
 #endif
 
-   IF ( ASSOCIATED(build_eri) ) CALL build_eri(erieval)
-   
+   !IF ( ASSOCIATED(build_eri) ) CALL build_eri(erieval)
 
    END SUBROUTINE
 #endif

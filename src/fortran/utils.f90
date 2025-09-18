@@ -1,14 +1,13 @@
 module utils
     use iso_c_binding
-    use molecule_struct
     use openacc
+    use basis_struct
     implicit none
     
 contains
     
     pure function factorial2(n) result(fact2)
         !$acc routine seq
-
         ! INPUT
         integer, intent(in) :: n
 
@@ -67,6 +66,20 @@ contains
         binom = binom / factorial(n-k)
 
     end function binom
+
+    integer function count_species(symbols, n, target)
+        character(len=2), dimension(n), intent(in) :: symbols
+        integer, intent(in) :: n
+        character(len=*), intent(in) :: target
+        integer :: i
+
+        count_species = 0
+        do i = 1, n
+            if (symbols(i) == target) then
+                count_species = count_species + 1
+            end if
+        end do
+    end function count_species
 
 
 end module utils
